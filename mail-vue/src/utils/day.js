@@ -37,9 +37,9 @@ export function fromNow(date) {
     } else {
 
         if (isToday) {
-            if (diffSeconds < 60) return `几秒前`;
-            if (diffMinutes < 60) return `${diffMinutes}分钟前`;
-            if (diffHours >= 1 && diffHours < 2) return '1小时前';
+            if (diffSeconds < 60) return `幾秒前`;
+            if (diffMinutes < 60) return `${diffMinutes}分鐘前`;
+            if (diffHours >= 1 && diffHours < 2) return '1小時前';
             return d.format('HH:mm');
         }
         else if (now.subtract(1, 'day').isSame(d, 'day')) {
