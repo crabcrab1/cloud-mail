@@ -373,7 +373,7 @@ const emailService = {
 					messageId: emailRow.messageId
 				});
 			} else {
-				sendResult = await this.sendByResend(resendToken, {
+				sendResult = await this.sendByProvider(resendToken, {
 					name,
 					accountEmail: accountRow.email,
 					receiveEmail,
@@ -508,6 +508,83 @@ const emailService = {
 		};
 	},
 
+	//按 token 前綴選擇發信服務：xkeysib- 開頭走 Brevo，其餘維持 Resend
+  async sendByProvider(token, params) {
+    if (typeof token === 'string' && token.trim().startsWith('xkeysib-')) {
+      return await this.sendByBrevo(token.trim(), params);
+    }
+    return await this.sendByResend(token, params);
+  },
+
+  //Brevo 發信（HTTP API，不需要額外套件）
+  async sendByBrevo(apiKey, params) {
+    const escapeHtml = (s = '') => String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    //Brevo 不支援 cid 內嵌圖片：移除失效的 cid 圖片標籤，圖片改以附件寄出
+    let htmlContent = (params.html || '')
+      .replace(/<img\b[^>]*\bsrc\s*=\s*["']cid:[^"']*["'][^>]*>/gi, '');
+    if (!htmlContent.trim()) {
+      htmlContent = '<pre style="font-family:inherit;white-space:pre-wrap">'
+        + escapeHtml(params.text || '') + '</pre>';
+    }
+
+    const body = {
+      sender: { name: params.name, email: params.accountEmail },
+      to: params.receiveEmail.map(address => ({ email: address })),
+      subject: params.subject,
+      htmlContent
+    };
+    if (params.text) body.textContent = params.text;
+
+    //Brevo 靠附件檔名的副檔名判斷類型，缺副檔名時按 mime 補上
+    const extByMime = {
+      'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif',
+      'image/bmp': '.bmp', 'application/pdf': '.pdf', 'text/plain': '.txt'
+    };
+    const attachment = [];
+    for (const att of (params.attachments || [])) {
+      const content = await this.toAttachmentBase64(att);
+      if (!content) continue;
+      let name = att.filename || 'attachment';
+      const mime = att.mimeType || att.contentType || att.type || '';
+      if (!/\.[A-Za-z0-9]{2,5}$/.test(name) && extByMime[mime]) name += extByMime[mime];
+      attachment.push({ name, content });
+    }
+    if (attachment.length > 0) body.attachment = attachment;
+
+    const replyId = params.sendType === 'reply' ? params.messageId : null;
+
+    const post = async (payload) => {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'content-type': 'application/json',
+          'api-key': apiKey
+        },
+        body: JSON.stringify(payload)
+      });
+      const json = await res.json().catch(() => ({}));
+      return { res, json };
+    };
+
+    let { res, json } = await post(replyId
+      ? { ...body, headers: { 'In-Reply-To': replyId, 'References': replyId } }
+      : body);
+
+    //帶回覆標頭被拒絕時，去掉標頭再試一次
+    if (!res.ok && res.status === 400 && replyId) {
+      ({ res, json } = await post(body));
+    }
+
+    if (!res.ok) {
+      return { error: { message: `Brevo ${res.status}: ${json.message || json.code || 'send failed'}` } };
+    }
+
+    const id = json.messageId || (json.messageIds && json.messageIds[0]) || '';
+    return { data: { id: String(id).replace(/^<|>$/g, '') } };
+  },
 	async sendByResend(resendToken, params) {
 		const resend = new Resend(resendToken);
 
