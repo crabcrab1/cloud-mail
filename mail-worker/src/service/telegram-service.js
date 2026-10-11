@@ -56,7 +56,7 @@ const telegramService = {
 			[
 				{
 					text: 'View',
-					url: webAppUrl
+					web_app: { url: webAppUrl }
 				}
 			]
 		];
